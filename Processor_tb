@@ -1,0 +1,127 @@
+module MIPS_32_tb;
+
+    // Clock signals
+    reg clk1, clk2;
+    
+    // Instantiate the processor
+    MIPS_32 cpu(clk1, clk2);
+    
+    // Clock generation
+    initial begin
+        clk1 = 0; clk2 = 0;
+        repeat(20) begin
+            #5 clk1 = 1; #5 clk1 = 0;
+            #5 clk2 = 1; #5 clk2 = 0;
+        end
+    end
+    
+    // Test program initialization
+    initial begin
+        // Initialize all registers to 0
+        for(integer i = 0; i < 32; i = i + 1) begin
+            cpu.REG[i] = 0;
+        end
+        
+        // Initialize some registers with test values
+        cpu.REG[1] = 32'h00000010;  // R1 = 16
+        cpu.REG[2] = 32'h00000020;  // R2 = 32  
+        cpu.REG[3] = 32'h00000005;  // R3 = 5
+        cpu.REG[4] = 32'h00000000;  // R4 = 0 (for branch testing)
+        
+        // Initialize PC
+        cpu.PC = 0;
+        cpu.HAULTED = 0;
+        cpu.TAKEN_BRANCH = 0;
+        
+        // Load test program into memory
+        // You can easily change these instructions to test different operations
+        
+        // TEST CASE 1: Basic arithmetic operations
+        cpu.MEM[0] = 32'b000000_00001_00010_00101_00000_000000; // ADD R5, R1, R2 (R5 = R1 + R2 = 48)
+        cpu.MEM[1] = 32'b000001_00101_00011_00110_00000_000000; // SUB R6, R5, R3 (R6 = R5 - R3 = 43)
+        cpu.MEM[2] = 32'b000010_00001_00010_00111_00000_000000; // AND R7, R1, R2
+        cpu.MEM[3] = 32'b000011_00001_00010_01000_00000_000000; // OR  R8, R1, R2
+        cpu.MEM[4] = 32'b001010_00001_00101_0000000000001010;   // ADDI R5, R1, 10 (R5 = R1 + 10 = 26)
+        cpu.MEM[5] = 32'b111111_00000_00000_0000000000000000;   // HLT
+        
+        /* 
+        // TEST CASE 2: Load/Store operations (uncomment to test)
+        cpu.MEM[0] = 32'b001001_00001_00000_0000000001100100; // SW R1, 100(R0) - Store R1 at MEM[100]
+        cpu.MEM[1] = 32'b001000_00000_00101_0000000001100100; // LW R5, 100(R0) - Load from MEM[100] to R5
+        cpu.MEM[2] = 32'b000000_00101_00010_00110_00000_000000; // ADD R6, R5, R2 (R6 = R5 + R2)
+        cpu.MEM[3] = 32'b111111_00000_00000_0000000000000000; // HLT
+        */
+        
+        /*
+        // TEST CASE 3: Branch operations (uncomment to test)
+        cpu.MEM[0] = 32'b001110_00100_00000_0000000000000011; // BEQZ R4, 3 (branch if R4==0, jump to PC+3)
+        cpu.MEM[1] = 32'b000000_00001_00010_00101_00000_000000; // ADD R5, R1, R2 (should be skipped)
+        cpu.MEM[2] = 32'b000001_00001_00002_00110_00000_000000; // SUB R6, R1, R2 (should be skipped)  
+        cpu.MEM[3] = 32'b000010_00001_00010_00111_00000_000000; // AND R7, R1, R2 (target instruction)
+        cpu.MEM[4] = 32'b111111_00000_00000_0000000000000000; // HLT
+        */
+        
+        $display("=== MIPS Processor Test Started ===");
+        $display("Initial Register Values:");
+        $display("R1 = %h, R2 = %h, R3 = %h, R4 = %h", cpu.REG[1], cpu.REG[2], cpu.REG[3], cpu.REG[4]);
+        $display("\nExecuting Test Program...\n");
+    end
+    
+    // Monitor execution
+    always @(posedge clk1) begin
+        if(cpu.HAULTED == 0) begin
+            $display("Cycle %0d: PC = %0d, Fetching instruction: %h", 
+                     $time/10, cpu.PC, cpu.MEM[cpu.PC]);
+        end
+    end
+    
+    always @(posedge clk2) begin
+        if(cpu.HAULTED == 0 && cpu.IF_ID_IR != 0) begin
+            $display("         Decoding: Opcode = %b, RS = %0d, RT = %0d, RD = %0d", 
+                     cpu.IF_ID_IR[31:26], cpu.IF_ID_IR[25:21], cpu.IF_ID_IR[20:16], cpu.IF_ID_IR[15:11]);
+        end
+    end
+    
+    // Monitor register changes
+    always @(posedge clk1) begin
+        if(cpu.MEM_WB_T == 3'b000 || cpu.MEM_WB_T == 3'b001 || cpu.MEM_WB_T == 3'b010) begin // RR_ALU, RM_ALU, LOAD
+            case(cpu.MEM_WB_T)
+                3'b000: $display("         Writing R%0d = %h (RR_ALU)", cpu.MEM_WB_IR[15:11], cpu.MEM_WB_ALU);
+                3'b001: $display("         Writing R%0d = %h (RM_ALU)", cpu.MEM_WB_IR[20:16], cpu.MEM_WB_ALU);
+                3'b010: $display("         Writing R%0d = %h (LOAD)", cpu.MEM_WB_IR[20:16], cpu.MEM_WB_LMD);
+            endcase
+        end
+        else if(cpu.MEM_WB_T == 3'b011) begin // STORE
+            $display("         Storing to MEM[%0d] = %h", cpu.EX_MEM_ALU, cpu.EX_MEM_B);
+        end
+    end
+    
+    // End simulation when halted
+    always @(posedge clk1) begin
+        if(cpu.HAULTED == 1) begin
+            #10;
+            $display("\n=== Processor Halted ===");
+            $display("Final Register Values:");
+            for(integer i = 1; i < 9; i = i + 1) begin
+                if(cpu.REG[i] != 0)
+                    $display("R%0d = %h (%0d)", i, cpu.REG[i], cpu.REG[i]);
+            end
+            $display("\nMemory Values (non-zero locations 100-110):");
+            for(integer i = 100; i < 111; i = i + 1) begin
+                if(cpu.MEM[i] != 0)
+                    $display("MEM[%0d] = %h", i, cpu.MEM[i]);
+            end
+            $finish;
+        end
+    end
+    
+    // Timeout to prevent infinite simulation
+    initial begin
+        #1000;
+        $display("Simulation timeout - processor may be stuck");
+        $finish;
+    end
+
+endmodule
+
+
