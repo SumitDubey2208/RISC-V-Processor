@@ -1,127 +1,223 @@
-module MIPS_32_tb;
+class mips_transaction extends uvm_sequence_item;
+  rand bit [31:0] instruction;
+  rand bit [31:0] data;
+  rand bit [9:0]  addr;
+  
+  `uvm_object_utils_begin(mips_transaction)
+    `uvm_field_int(instruction, UVM_ALL_ON)
+    `uvm_field_int(data, UVM_ALL_ON)
+    `uvm_field_int(addr, UVM_ALL_ON)
+  `uvm_object_utils_end
+  
+  function new(string name = "mips_transaction");
+    super.new(name);
+  endfunction
+endclass
 
-    // Clock signals
-    reg clk1, clk2;
-    
-    // Instantiate the processor
-    MIPS_32 cpu(clk1, clk2);
-    
-    // Clock generation
-    initial begin
-        clk1 = 0; clk2 = 0;
-        repeat(20) begin
-            #5 clk1 = 1; #5 clk1 = 0;
-            #5 clk2 = 1; #5 clk2 = 0;
-        end
-    end
-    
-    // Test program initialization
-    initial begin
-        // Initialize all registers to 0
-        for(integer i = 0; i < 32; i = i + 1) begin
-            cpu.REG[i] = 0;
-        end
-        
-        // Initialize some registers with test values
-        cpu.REG[1] = 32'h00000010;  // R1 = 16
-        cpu.REG[2] = 32'h00000020;  // R2 = 32  
-        cpu.REG[3] = 32'h00000005;  // R3 = 5
-        cpu.REG[4] = 32'h00000000;  // R4 = 0 (for branch testing)
-        
-        // Initialize PC
-        cpu.PC = 0;
-        cpu.HAULTED = 0;
-        cpu.TAKEN_BRANCH = 0;
-        
-        // Load test program into memory
-        // You can easily change these instructions to test different operations
-        
-        // TEST CASE 1: Basic arithmetic operations
-        cpu.MEM[0] = 32'b000000_00001_00010_00101_00000_000000; // ADD R5, R1, R2 (R5 = R1 + R2 = 48)
-        cpu.MEM[1] = 32'b000001_00101_00011_00110_00000_000000; // SUB R6, R5, R3 (R6 = R5 - R3 = 43)
-        cpu.MEM[2] = 32'b000010_00001_00010_00111_00000_000000; // AND R7, R1, R2
-        cpu.MEM[3] = 32'b000011_00001_00010_01000_00000_000000; // OR  R8, R1, R2
-        cpu.MEM[4] = 32'b001010_00001_00101_0000000000001010;   // ADDI R5, R1, 10 (R5 = R1 + 10 = 26)
-        cpu.MEM[5] = 32'b111111_00000_00000_0000000000000000;   // HLT
-        
-        /* 
-        // TEST CASE 2: Load/Store operations (uncomment to test)
-        cpu.MEM[0] = 32'b001001_00001_00000_0000000001100100; // SW R1, 100(R0) - Store R1 at MEM[100]
-        cpu.MEM[1] = 32'b001000_00000_00101_0000000001100100; // LW R5, 100(R0) - Load from MEM[100] to R5
-        cpu.MEM[2] = 32'b000000_00101_00010_00110_00000_000000; // ADD R6, R5, R2 (R6 = R5 + R2)
-        cpu.MEM[3] = 32'b111111_00000_00000_0000000000000000; // HLT
-        */
-        
-        /*
-        // TEST CASE 3: Branch operations (uncomment to test)
-        cpu.MEM[0] = 32'b001110_00100_00000_0000000000000011; // BEQZ R4, 3 (branch if R4==0, jump to PC+3)
-        cpu.MEM[1] = 32'b000000_00001_00010_00101_00000_000000; // ADD R5, R1, R2 (should be skipped)
-        cpu.MEM[2] = 32'b000001_00001_00002_00110_00000_000000; // SUB R6, R1, R2 (should be skipped)  
-        cpu.MEM[3] = 32'b000010_00001_00010_00111_00000_000000; // AND R7, R1, R2 (target instruction)
-        cpu.MEM[4] = 32'b111111_00000_00000_0000000000000000; // HLT
-        */
-        
-        $display("=== MIPS Processor Test Started ===");
-        $display("Initial Register Values:");
-        $display("R1 = %h, R2 = %h, R3 = %h, R4 = %h", cpu.REG[1], cpu.REG[2], cpu.REG[3], cpu.REG[4]);
-        $display("\nExecuting Test Program...\n");
-    end
-    
-    // Monitor execution
-    always @(posedge clk1) begin
-        if(cpu.HAULTED == 0) begin
-            $display("Cycle %0d: PC = %0d, Fetching instruction: %h", 
-                     $time/10, cpu.PC, cpu.MEM[cpu.PC]);
-        end
-    end
-    
-    always @(posedge clk2) begin
-        if(cpu.HAULTED == 0 && cpu.IF_ID_IR != 0) begin
-            $display("         Decoding: Opcode = %b, RS = %0d, RT = %0d, RD = %0d", 
-                     cpu.IF_ID_IR[31:26], cpu.IF_ID_IR[25:21], cpu.IF_ID_IR[20:16], cpu.IF_ID_IR[15:11]);
-        end
-    end
-    
-    // Monitor register changes
-    always @(posedge clk1) begin
-        if(cpu.MEM_WB_T == 3'b000 || cpu.MEM_WB_T == 3'b001 || cpu.MEM_WB_T == 3'b010) begin // RR_ALU, RM_ALU, LOAD
-            case(cpu.MEM_WB_T)
-                3'b000: $display("         Writing R%0d = %h (RR_ALU)", cpu.MEM_WB_IR[15:11], cpu.MEM_WB_ALU);
-                3'b001: $display("         Writing R%0d = %h (RM_ALU)", cpu.MEM_WB_IR[20:16], cpu.MEM_WB_ALU);
-                3'b010: $display("         Writing R%0d = %h (LOAD)", cpu.MEM_WB_IR[20:16], cpu.MEM_WB_LMD);
-            endcase
-        end
-        else if(cpu.MEM_WB_T == 3'b011) begin // STORE
-            $display("         Storing to MEM[%0d] = %h", cpu.EX_MEM_ALU, cpu.EX_MEM_B);
-        end
-    end
-    
-    // End simulation when halted
-    always @(posedge clk1) begin
-        if(cpu.HAULTED == 1) begin
-            #10;
-            $display("\n=== Processor Halted ===");
-            $display("Final Register Values:");
-            for(integer i = 1; i < 9; i = i + 1) begin
-                if(cpu.REG[i] != 0)
-                    $display("R%0d = %h (%0d)", i, cpu.REG[i], cpu.REG[i]);
-            end
-            $display("\nMemory Values (non-zero locations 100-110):");
-            for(integer i = 100; i < 111; i = i + 1) begin
-                if(cpu.MEM[i] != 0)
-                    $display("MEM[%0d] = %h", i, cpu.MEM[i]);
-            end
-            $finish;
-        end
-    end
-    
-    // Timeout to prevent infinite simulation
-    initial begin
-        #1000;
-        $display("Simulation timeout - processor may be stuck");
-        $finish;
-    end
+class mips_sequencer extends uvm_sequencer#(mips_transaction);
+  `uvm_component_utils(mips_sequencer)
+  
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+endclass
 
+class mips_driver extends uvm_driver#(mips_transaction);
+  `uvm_component_utils(mips_driver)
+  virtual mips_if vif;
+  
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    if(!uvm_config_db#(virtual mips_if)::get(this, "", "vif", vif))
+      `uvm_fatal("NOVIF", "Virtual interface not found")
+  endfunction
+  
+  virtual task run_phase(uvm_phase phase);
+    forever begin
+      seq_item_port.get_next_item(req);
+      @(posedge vif.clk1);
+      seq_item_port.item_done();
+    end
+  endtask
+endclass
+
+class mips_monitor extends uvm_monitor;
+  `uvm_component_utils(mips_monitor)
+  virtual mips_if vif;
+  uvm_analysis_port#(mips_transaction) item_collected_port;
+  mips_transaction trans_collected;
+  
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+    item_collected_port = new("item_collected_port", this);
+  endfunction
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    if(!uvm_config_db#(virtual mips_if)::get(this, "", "vif", vif))
+      `uvm_fatal("NOVIF", "Virtual interface not found")
+  endfunction
+  
+  virtual task run_phase(uvm_phase phase);
+    forever begin
+      @(posedge vif.clk1);
+      trans_collected = mips_transaction::type_id::create("trans_collected");
+      item_collected_port.write(trans_collected);
+    end
+  endtask
+endclass
+
+class mips_agent extends uvm_agent;
+  `uvm_component_utils(mips_agent)
+  mips_driver driver;
+  mips_sequencer sequencer;
+  mips_monitor monitor;
+  
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    driver = mips_driver::type_id::create("driver", this);
+    sequencer = mips_sequencer::type_id::create("sequencer", this);
+    monitor = mips_monitor::type_id::create("monitor", this);
+  endfunction
+  
+  virtual function void connect_phase(uvm_phase phase);
+    driver.seq_item_port.connect(sequencer.seq_item_port);
+  endfunction
+endclass
+
+class mips_scoreboard extends uvm_scoreboard;
+  `uvm_component_utils(mips_scoreboard)
+  uvm_analysis_imp#(mips_transaction, mips_scoreboard) item_collected_export;
+  int passed, failed;
+  
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    item_collected_export = new("item_collected_export", this);
+  endfunction
+  
+  virtual function void write(mips_transaction trans);
+    `uvm_info(get_type_name(), $sformatf("Transaction received"), UVM_LOW)
+    passed++;
+  endfunction
+  
+  virtual function void report_phase(uvm_phase phase);
+    `uvm_info(get_type_name(), $sformatf("Passed: %0d, Failed: %0d", passed, failed), UVM_LOW)
+  endfunction
+endclass
+
+class mips_env extends uvm_env;
+  `uvm_component_utils(mips_env)
+  mips_agent agent;
+  mips_scoreboard scoreboard;
+  
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    agent = mips_agent::type_id::create("agent", this);
+    scoreboard = mips_scoreboard::type_id::create("scoreboard", this);
+  endfunction
+  
+  virtual function void connect_phase(uvm_phase phase);
+    agent.monitor.item_collected_port.connect(scoreboard.item_collected_export);
+  endfunction
+endclass
+
+class basic_sequence extends uvm_sequence#(mips_transaction);
+  `uvm_object_utils(basic_sequence)
+  
+  function new(string name = "basic_sequence");
+    super.new(name);
+  endfunction
+  
+  virtual task body();
+    mips_transaction trans;
+    
+    trans = mips_transaction::type_id::create("trans");
+    start_item(trans);
+    trans.instruction = {6'b000000, 5'd1, 5'd2, 5'd3, 11'd0};
+    finish_item(trans);
+    
+    trans = mips_transaction::type_id::create("trans");
+    start_item(trans);
+    trans.instruction = {6'b001010, 5'd1, 5'd4, 16'd10};
+    finish_item(trans);
+    
+    trans = mips_transaction::type_id::create("trans");
+    start_item(trans);
+    trans.instruction = {6'b111111, 26'd0};
+    finish_item(trans);
+  endtask
+endclass
+
+class mips_test extends uvm_test;
+  `uvm_component_utils(mips_test)
+  mips_env env;
+  basic_sequence seq;
+  
+  function new(string name, uvm_component parent);
+    super.new(name, parent);
+  endfunction
+  
+  virtual function void build_phase(uvm_phase phase);
+    super.build_phase(phase);
+    env = mips_env::type_id::create("env", this);
+  endfunction
+  
+  virtual task run_phase(uvm_phase phase);
+    phase.raise_objection(this);
+    seq = basic_sequence::type_id::create("seq");
+    seq.start(env.agent.sequencer);
+    #1000;
+    phase.drop_objection(this);
+  endtask
+endclass
+
+interface mips_if(input logic clk1, clk2);
+  logic reset;
+endinterface
+
+module top;
+  import uvm_pkg::*;
+  `include "uvm_macros.svh"
+  
+  logic clk1, clk2;
+  
+  initial begin
+    clk1 = 0;
+    forever #5 clk1 = ~clk1;
+  end
+  
+  initial begin
+    clk2 = 0;
+    forever #10 clk2 = ~clk2;
+  end
+  
+  mips_if vif(clk1, clk2);
+  
+  MIPS_32 dut(.clk1(clk1), .clk2(clk2));
+  
+  initial begin
+    uvm_config_db#(virtual mips_if)::set(null, "*", "vif", vif);
+    run_test("mips_test");
+  end
+  
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(0, top);
+  end
 endmodule
-
-
